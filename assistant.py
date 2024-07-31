@@ -1,92 +1,94 @@
-import speech_recognition as sr
-import pyaudio
-import wave
 import os
+import readline
+import sys
+import dotenv
+from llamaapi import LlamaAPI
+from subprocess import Popen, PIPE
 
-# Dictionary mapping voice commands to shell commands
-commands = {
-    "list files": "ls",
-    "show directory": "pwd",
-    "who am I": "whoami",
-    "shutdown": "shutdown now",
-    "reboot": "reboot"
-}
+# Load environment variables from .env file
+dotenv.load_dotenv()
 
-def record_audio(filename="audio.wav", duration=5):
-    CHUNK = 1024
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 1
-    RATE = 44100
+# Get API token from environment variable
+api_token = os.environ.get("API_TOKEN")
 
-    p = pyaudio.PyAudio()
+# Initialize LlamaAI client
+llama_api = LlamaAPI(api_token)
 
-    stream = p.open(format=FORMAT,
-                    channels=CHANNELS,
-                    rate=RATE,
-                    input=True,
-                    frames_per_buffer=CHUNK)
+# Initial message to user
+messages = [
+    {
+        "role": "system",
+        "content": (
+            "You are a translator between natural language and terminal commands. "
+            "Your goal is to respond only with relevant commands."
+        ),
+    }
+]
 
-    print("Recording...")
-    frames = []
+def handle_prompt(query):
+    # If user wants to quit, exit the program
+    if query == "quit" or query == "exit":
+        sys.exit()
+    
+    # Add additional information to query.
+    # This is a hack to make the AI more accurate.
+    query = query + ", I am on platform " + sys.platform + " and my current directory is " + os.getcwd() + ". The current process id is " + str(os.getpid()) + "."
+    # Add user query to message list
+    messages.append({"role": "user", "content": query})
 
-    for _ in range(0, int(RATE / CHUNK * duration)):
-        data = stream.read(CHUNK)
-        frames.append(data)
+    # Prepare API request
+    api_request = {
+        "messages": messages,
+        "temperature": 0.9,
+        "stream": False,
+    }
 
-    print("Finished recording.")
+    # Send request to LlamaAI and process response
+    try:
+        response = llama_api.run(api_request)
+        commands = response.json()["choices"][0]["message"]["content"].split("\n")
+        print(commands)
+        # Execute each command and stop if one fails
+        for command in commands:
+            # check if contains "```" or '' and skip
+            if(command.find("```") != -1 or command.find("''") != -1):
+                continue
+            proc = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
+            stdout, stderr = proc.communicate()
 
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-
-    wf = wave.open(filename, 'wb')
-    wf.setnchannels(CHANNELS)
-    wf.setsampwidth(p.get_sample_size(FORMAT))
-    wf.setframerate(RATE)
-    wf.writeframes(b''.join(frames))
-    wf.close()
-
-    return filename
-
-def recognize_speech_from_audio_file(recognizer, filename):
-    with sr.AudioFile(filename) as source:
-        audio_data = recognizer.record(source)
-        return recognizer.recognize_google(audio_data)
-
-def main():
-    recognizer = sr.Recognizer()
-
-    while True:
-        print("\nSay a command...")
-        audio_file = record_audio()
-        try:
-            command = recognize_speech_from_audio_file(recognizer, audio_file)
-            print(f"You said: {command}")
-            action = commands.get(command.lower())
-            if action:
-                print(f"Executing: {action}")
-                os.system(action)
-            else:
-                print("Command not recognized.")
-        except sr.UnknownValueError:
-            print("Sorry, I did not understand that.")
-        except sr.RequestError as e:
-            print(f"Could not request results from Google Speech Recognition service; {e}")
-        except Exception as e:
-            print(f"ERROR: {e}")
-
-        print("Do you want to continue? (yes/no)")
-        audio_file = record_audio()
-        try:
-            continue_command = recognize_speech_from_audio_file(recognizer, audio_file)
-            if continue_command.lower() == "no":
+            if proc.returncode != 0:
+                print(f"Error: {stderr.decode('utf-8')}")
+                print("Retrying...")
+                # remove last message
+                messages.pop()
+                # send error message to llama
+                handle_prompt(query)
                 break
-        except sr.UnknownValueError:
-            print("Sorry, I did not understand that.")
-        except sr.RequestError as e:
-            print(f"Could not request results from Google Speech Recognition service; {e}")
-        except Exception as e:
-            print(f"ERROR: {e}")
+            else:
+                print(f"Output:\n{stdout.decode('utf-8')}")
 
-if __name__ == "__main__":
-    main()
+        # If all commands succeed, find the next command
+        else:
+            messages.pop()
+            find_terminal_command()
+    except Exception as error:
+        print(f"An error occurred: {error}")
+        print(response.json())
+        find_terminal_command()
+
+
+
+def find_terminal_command():
+    # Prompt user for input
+    query = input("Prompt: ")
+    handle_prompt(query)
+
+# Start the conversation loop
+find_terminal_command()
+
+def execute(command):
+    print(command)
+    proc = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
+    stdout , stderr = proc.communicate()
+
+# Need to use huawei ai, not llama
