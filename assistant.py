@@ -4,6 +4,7 @@ import sys
 import dotenv
 from llamaapi import LlamaAPI
 from subprocess import Popen, PIPE
+import speech_recognition as sr
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
@@ -24,6 +25,32 @@ messages = [
         ),
     }
 ]
+
+def voice_to_text():
+    # Initialize the recognizer
+    recognizer = sr.Recognizer()
+    
+    # Set up the microphone
+    with sr.Microphone() as source:
+        print("Please speak now...")
+        # Adjust the recognizer sensitivity to ambient noise
+        recognizer.adjust_for_ambient_noise(source)
+        # Capture the audio
+        audio = recognizer.listen(source)
+        
+        try:
+            # Recognize the speech using Google Web Speech API
+            text = recognizer.recognize_google(audio)
+            print("You said: " + text)
+            return text
+        except sr.UnknownValueError:
+            # Speech was unintelligible
+            print("Google Web Speech API could not understand the audio. Please try again")
+            return None
+        except sr.RequestError as e:
+            # API was unreachable or unresponsive
+            print(f"Could not request results from Google Web Speech API. Please ty again")
+            return None
 
 def handle_prompt(query):
     # If user wants to quit, exit the program
@@ -80,15 +107,16 @@ def handle_prompt(query):
 
 def find_terminal_command():
     # Prompt user for input
-    query = input("Prompt: ")
-    handle_prompt(query)
-
-# Start the conversation loop
-find_terminal_command()
+    query = voice_to_text()
+    if query:
+        handle_prompt(query)
+    else :
+        find_terminal_command()
 
 def execute(command):
     print(command)
     proc = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
     stdout , stderr = proc.communicate()
 
-# Need to use huawei ai, not llama
+if __name__ == "__main__":
+    find_terminal_command()
